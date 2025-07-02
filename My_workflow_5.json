@@ -1,0 +1,309 @@
+{
+  "name": "My workflow 5",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "/smart_notifier",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        20,
+        -180
+      ],
+      "id": "32832eed-69bd-4610-8ecf-a42a87c5dec4",
+      "name": "Webhook",
+      "webhookId": "b559e344-b92a-416c-be67-d99abaa98d0a"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=New user registered:\nName: {{ $json.name }}\nEmail: {{ $json.email }}\nPhone: {{ $json.phone || \"Not provided\" }}\nRegistration Time: {{ new Date().toLocaleString() }}\n\nCreate a personalized welcome message for this user. Be warm and professional.",
+        "options": {
+          "systemMessage": "You are a registration assistant. When someone registers, analyze their information and create a personalized welcome message response.\n\nYour job:\n1. Acknowledge their registration\n2. Create a warm, professional welcome message\n3. Include their details for confirmation\n\nRespond with JSON:\n{\n  \"welcome_message\": \"personalized message text\",\n  \"tone\": \"professional|friendly|casual\",\n  \"include_details\": true,\n  \"follow_up\": \"any additional instructions\"\n}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        180,
+        -240
+      ],
+      "id": "46d7f9cc-9374-412b-b5dd-3d26fc691273",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatMistralCloud",
+      "typeVersion": 1,
+      "position": [
+        100,
+        20
+      ],
+      "id": "b40b8efc-17f3-4a91-91d5-e0ad9690c9ce",
+      "name": "Mistral Cloud Chat Model",
+      "credentials": {
+        "mistralCloudApi": {
+          "id": "wjsqFJUP4JliQdUJ",
+          "name": "Mistral Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        940,
+        -240
+      ],
+      "id": "2d6a5b1b-5bae-4e66-b3fe-2e406df95952",
+      "name": "Send a message",
+      "webhookId": "11058a85-b15b-49d0-9278-d9300f0f741e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8Fj5qV6OcfqLbBte",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced Multi-Channel Registration Processor with Error Handling\ntry {\n  console.log('=== MULTI-CHANNEL PROCESSOR START ===');\n  \n  // Get input data\n  const aiResponse = $input.all()[0]?.json;\n  const webhookData = $('Webhook').first()?.json;\n  \n  if (!webhookData) {\n    throw new Error('No webhook data received');\n  }\n  \n  console.log('Webhook Data:', JSON.stringify(webhookData, null, 2));\n  console.log('AI Response:', JSON.stringify(aiResponse, null, 2));\n  \n  // Extract user data from webhook body\n  const userData = webhookData.body || webhookData;\n  \n  // Validate required fields\n  if (!userData.name && !userData.email) {\n    throw new Error('Missing required fields: name or email must be provided');\n  }\n  \n  const userName = userData.name || \"Unknown User\";\n  const userEmail = userData.email || \"\";\n  const userPhone = userData.phone || \"Not provided\";\n  const userSlack = userData.slack || userData.slack_id || userData.slack_username || \"\";\n  const userCompany = userData.company || \"\";\n  const registrationSource = userData.source || \"website\";\n  \n  console.log('=== EXTRACTED DATA ===');\n  console.log('User Name:', userName);\n  console.log('User Email:', userEmail);\n  console.log('User Phone:', userPhone);\n  console.log('User Slack:', userSlack);\n  console.log('Company:', userCompany);\n  console.log('Source:', registrationSource);\n  \n  // Validate email format if provided\n  const emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n  if (userEmail && !emailRegex.test(userEmail)) {\n    console.log('⚠️ Invalid email format detected:', userEmail);\n  }\n  \n  // Determine available channels\n  const availableChannels = [];\n  if (userEmail && emailRegex.test(userEmail)) availableChannels.push(\"email\");\n  if (userSlack) availableChannels.push(\"slack\");\n  \n  if (availableChannels.length === 0) {\n    throw new Error('No valid communication channels available');\n  }\n  \n  console.log('Available channels:', availableChannels);\n  \n  // Extract AI-generated message with fallback\n  let aiMessage = `Dear ${userName}, welcome to our platform! We're excited to have you join our community.`;\n  let aiTone = \"professional\";\n  \n  try {\n    if (aiResponse) {\n      let aiContent = aiResponse.output || aiResponse.text || aiResponse.response || aiResponse.message;\n      \n      if (aiContent && typeof aiContent === 'string') {\n        // Try to parse JSON from AI response\n        const jsonMatch = aiContent.match(/\\{[\\s\\S]*\\}/);\n        if (jsonMatch) {\n          const aiJson = JSON.parse(jsonMatch[0]);\n          aiMessage = aiJson.welcome_message || aiMessage;\n          aiTone = aiJson.tone || aiTone;\n          console.log('✅ Successfully parsed AI JSON');\n        } else {\n          // Use AI response as plain text if no JSON found\n          aiMessage = aiContent.length > 10 ? aiContent : aiMessage;\n          console.log('✅ Using AI response as plain text');\n        }\n      }\n    }\n  } catch (error) {\n    console.log('⚠️ Could not parse AI response, using default message:', error.message);\n  }\n  \n  // Intelligent channel selection logic\n  let selectedChannels = [];\n  let primaryChannel = \"email\"; // default\n  \n  if (userCompany && userSlack) {\n    // Business user with Slack - prefer Slack for immediate notification\n    primaryChannel = \"slack\";\n    selectedChannels = [\"slack\"];\n    if (userEmail && emailRegex.test(userEmail)) selectedChannels.push(\"email\");\n  } else if (userSlack && (!userEmail || !emailRegex.test(userEmail))) {\n    // Slack only or invalid email\n    primaryChannel = \"slack\";\n    selectedChannels = [\"slack\"];\n  } else if (userEmail && emailRegex.test(userEmail) && !userSlack) {\n    // Email only\n    primaryChannel = \"email\";\n    selectedChannels = [\"email\"];\n  } else if (userEmail && emailRegex.test(userEmail) && userSlack) {\n    // Both available - choose based on source\n    if (registrationSource === \"team\" || registrationSource === \"workspace\") {\n      primaryChannel = \"slack\";\n      selectedChannels = [\"slack\", \"email\"];\n    } else {\n      primaryChannel = \"email\";\n      selectedChannels = [\"email\"];\n    }\n  } else {\n    // Fallback to available channel\n    selectedChannels = availableChannels;\n    primaryChannel = availableChannels[0];\n  }\n  \n  console.log('=== ROUTING DECISION ===');\n  console.log('Primary Channel:', primaryChannel);\n  console.log('Selected Channels:', selectedChannels);\n  \n  // Create HTML email template\n  const htmlEmail = `\n<!DOCTYPE html>\n<html>\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>Welcome ${userName}</title>\n</head>\n<body style=\"margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f5f5f5;\">\n    <div style=\"max-width: 600px; margin: 0 auto; background-color: white; box-shadow: 0 2px 10px rgba(0,0,0,0.1);\">\n        \n        <!-- Header -->\n        <div style=\"background: linear-gradient(135deg, #4CAF50, #45a049); color: white; padding: 40px 20px; text-align: center;\">\n            <h1 style=\"margin: 0; font-size: 28px;\">🎉 Welcome ${userName}!</h1>\n            <p style=\"margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;\">Thank you for joining us</p>\n        </div>\n        \n        <!-- AI Message -->\n        <div style=\"padding: 30px 20px;\">\n            <div style=\"background: #f0f8f0; padding: 20px; border-left: 4px solid #4CAF50; border-radius: 5px; margin: 20px 0;\">\n                <p style=\"margin: 0; font-size: 16px; line-height: 1.6; color: #333;\">${aiMessage}</p>\n            </div>\n            \n            <!-- Registration Details -->\n            <div style=\"background: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;\">\n                <h3 style=\"margin: 0 0 15px 0; color: #333;\">📋 Registration Details</h3>\n                <p style=\"margin: 5px 0; color: #555;\"><strong>Name:</strong> ${userName}</p>\n                <p style=\"margin: 5px 0; color: #555;\"><strong>Email:</strong> ${userEmail}</p>\n                <p style=\"margin: 5px 0; color: #555;\"><strong>Phone:</strong> ${userPhone}</p>\n                ${userCompany ? `<p style=\"margin: 5px 0; color: #555;\"><strong>Company:</strong> ${userCompany}</p>` : ''}\n                ${userSlack ? `<p style=\"margin: 5px 0; color: #555;\"><strong>Slack:</strong> ${userSlack}</p>` : ''}\n                <p style=\"margin: 5px 0; color: #555;\"><strong>Source:</strong> ${registrationSource}</p>\n                <p style=\"margin: 5px 0; color: #555;\"><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>\n            </div>\n            \n            <!-- Channel Info -->\n            <div style=\"background: #e3f2fd; padding: 15px; border-radius: 5px; margin: 20px 0;\">\n                <p style=\"margin: 0; color: #1976d2; font-size: 14px;\">\n                    📡 <strong>Notification sent via:</strong> ${selectedChannels.join(', ')}\n                </p>\n            </div>\n            \n            <!-- Welcome Message -->\n            <div style=\"text-align: center; margin: 30px 0;\">\n                <p style=\"font-size: 16px; color: #333; margin: 0;\">Welcome to our community! 🌟</p>\n            </div>\n        </div>\n        \n        <!-- Footer -->\n        <div style=\"background: #f8f9fa; padding: 20px; text-align: center; border-top: 1px solid #eee;\">\n            <p style=\"margin: 0; color: #999; font-size: 14px;\">\n                Registration confirmed • ${new Date().toLocaleDateString()}\n            </p>\n        </div>\n    </div>\n</body>\n</html>\n`;\n\n  // Create Slack message\n  const slackMessage = `🎉 *Welcome ${userName}!*\n\n${aiMessage}\n\n📋 *Registration Details:*\n• Name: ${userName}\n• Email: ${userEmail}\n• Phone: ${userPhone}\n${userCompany ? `• Company: ${userCompany}` : ''}\n• Source: ${registrationSource}\n• Date: ${new Date().toLocaleDateString()}\n\nWelcome to our community! 🌟\n\n_Registration confirmed at ${new Date().toLocaleTimeString()}_`;\n\n  console.log('✅ Multi-channel content created successfully');\n  \n  // Return data for routing - ensuring all values are properly defined\n  const result = {\n    // Routing decisions - using boolean values for Switch node\n    primary_channel: primaryChannel || \"email\",\n    selected_channels: selectedChannels || [\"email\"],\n    \n    // Explicit boolean flags for Switch node\n    send_email: selectedChannels.includes('email'),\n    send_slack: selectedChannels.includes('slack'),\n    \n    // User data - ensure all are strings\n    user_name: userName ? userName.toString() : \"Unknown User\",\n    user_email: userEmail ? userEmail.toString() : \"\",\n    user_phone: userPhone ? userPhone.toString() : \"Not provided\",\n    user_slack: userSlack ? userSlack.toString() : \"\",\n    user_company: userCompany ? userCompany.toString() : \"\",\n    \n    // Email data - ensure strings, not null\n    to: (selectedChannels.includes('email') && userEmail) ? userEmail.toString() : \"\",\n    subject: selectedChannels.includes('email') ? `🎉 Welcome ${userName || 'User'}! Registration Confirmed` : \"\",\n    html: selectedChannels.includes('email') ? htmlEmail : \"\",\n    \n    // Slack data - ensure strings, not null\n    slack_channel: (selectedChannels.includes('slack') && userSlack) ? \n      (userSlack.toString().startsWith('@') ? userSlack.toString() : `@${userSlack.toString()}`) : \"\",\n    slack_message: selectedChannels.includes('slack') ? slackMessage : \"\",\n    \n    // Metadata\n    ai_message: aiMessage ? aiMessage.toString() : \"\",\n    ai_tone: aiTone ? aiTone.toString() : \"professional\",\n    registration_source: registrationSource ? registrationSource.toString() : \"unknown\",\n    available_channels: availableChannels || [],\n    debug_status: \"success\",\n    timestamp: new Date().toISOString()\n  };\n  \n  console.log('=== FINAL RESULT ===');\n  console.log(JSON.stringify(result, null, 2));\n  \n  return result;\n  \n} catch (error) {\n  console.log('❌ Critical error:', error.message);\n  console.log('❌ Stack trace:', error.stack);\n  \n  // Return error data with fallback values\n  return {\n    error: error.message,\n    debug_status: \"failed\",\n    timestamp: new Date().toISOString(),\n    // Fallback data to prevent downstream errors\n    selected_channels: [\"email\"], // Default to email\n    user_name: \"Unknown User\",\n    user_email: \"admin@yourcompany.com\", // Replace with your admin email\n    to: \"admin@yourcompany.com\",\n    subject: \"⚠️ Registration Error - Manual Review Required\",\n    html: `<p>Error processing registration: ${error.message}</p><p>Please review the webhook data manually.</p>`,\n    primary_channel: \"email\"\n  };\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        -240
+      ],
+      "id": "0ca38d6e-e18d-452e-9f35-fb7c626dba3b",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C093MS0SCM8",
+          "mode": "list",
+          "cachedResultName": "all-dmltest"
+        },
+        "text": "={{ $json.slack_message }}",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        960,
+        -80
+      ],
+      "id": "efd29eff-556d-4772-b334-23d878c6160c",
+      "name": "Send a message1",
+      "webhookId": "b8007e00-48cd-45ad-a948-8fef39d2ef29",
+      "credentials": {
+        "slackApi": {
+          "id": "uao3clhChIUobnkN",
+          "name": "DML_Test"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.selected_channels.includes('email') }}",
+                    "rightValue": "true",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "5b3b8c0e-d511-4d9a-8406-72f642bc3778"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Gmail"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "e2e6545d-1126-4577-b638-55f889918286",
+                    "leftValue": "={{ $json.selected_channels.includes('slack') }}",
+                    "rightValue": "true",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Slack"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {
+          "allMatchingOutputs": true
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        620,
+        -240
+      ],
+      "id": "fc372b3d-c89d-40ae-b552-f09b4ab4a0f0",
+      "name": "Switch"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        780,
+        -240
+      ],
+      "id": "d887b333-bdad-4990-9141-08faf1b38b15",
+      "name": "No Operation, do nothing"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        780,
+        -80
+      ],
+      "id": "574658fb-60be-44ec-a8ba-732c103fd0a9",
+      "name": "No Operation, do nothing1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mistral Cloud Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Operation, do nothing1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Operation, do nothing": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Operation, do nothing1": {
+      "main": [
+        [
+          {
+            "node": "Send a message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "04be16a1-c59c-4b9e-9e95-fb470ed3cff9",
+  "meta": {
+    "instanceId": "fe80c5873abb137ede369174b90a33df559743dd553e99b5b7c7ef38c85d0ac6"
+  },
+  "id": "AOWtBDyF6gSIwNw8",
+  "tags": []
+}
